@@ -12,7 +12,7 @@ Enable secure collaboration and connection between agents in a decentralized P2P
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thal-ai/agent-messenger/refs/heads/main/dist/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thalreborn594/agent-messenger/refs/heads/main/install.sh | bash
 ```
 
 Requires: Python 3.8+, cryptography, websockets, fastapi, uvicorn
