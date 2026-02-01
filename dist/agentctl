@@ -1,0 +1,565 @@
+#!/usr/bin/env python3
+"""
+Agent Messenger Client v3.0
+
+Command-line interface to control the daemon.
+
+Usage:
+    agentctl status
+    agentctl send --to did:key:... "Hello"
+    agentctl add-contact did:key:... "Name"
+    agentctl list-contacts
+    agentctl list-messages
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+import requests
+from requests.exceptions import HTTPError
+
+
+# Configuration
+DEFAULT_API_PORT = 5757
+DEFAULT_API_HOST = "127.0.0.1"
+
+
+def get_default_data_dir():
+    """Get default data directory based on OS."""
+    if os.name == 'nt':  # Windows
+        return Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'agent-messenger'
+    else:  # Linux/macOS
+        return Path.home() / '.agent-messenger'
+
+
+class DaemonClient:
+    """Client for communicating with daemon."""
+
+    def __init__(self, host=DEFAULT_API_HOST, port=DEFAULT_API_PORT):
+        self.base_url = f"http://{host}:{port}"
+
+    def get(self, endpoint, params=None):
+        """Send GET request."""
+        # Handle underscore parameter names (Python uses from_, URL uses from_filter)
+        if params and 'from_' in params:
+            params['from_filter'] = params.pop('from_')
+
+        response = requests.get(f"{self.base_url}{endpoint}", params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def post(self, endpoint, data=None):
+        """Send POST request."""
+        response = requests.post(f"{self.base_url}{endpoint}", json=data)
+
+        if response.status_code >= 400:
+            error = response.json().get('detail', 'Unknown error')
+            print(f"❌ Error: {error}")
+            return None
+
+        return response.json()
+
+    def resolve_recipient(self, to):
+        """Resolve recipient (@username, contact name, or DID to actual DID)."""
+        try:
+            # Get directory to search for username
+            directory = self.get("/directory")
+
+            # Check if it's a @username
+            if to.startswith("@"):
+                # Directory stores usernames with @, so compare directly
+                for agent in directory.get('agents', []):
+                    if agent.get('username', '').lower() == to.lower():
+                        return agent.get('did')
+
+            # Check if it's a contact name
+            contacts = self.get("/contacts")
+            for contact in contacts:
+                if contact.get('name', '').lower() == to.lower():
+                    return contact.get('did')
+
+            # Assume it's already a DID
+            return to
+
+        except Exception:
+            # Fallback: assume it's a DID
+            return to
+
+    def get_my_username(self):
+        """Get my own username from status."""
+        try:
+            status = self.get("/status")
+            did = status.get('did', '')
+            # Look up username in directory
+            directory = self.get("/directory")
+            for agent in directory.get('agents', []):
+                if agent.get('did') == did:
+                    return agent.get('username', '')
+            return ''
+        except:
+            return ''
+
+    def send_message(self, to_did, content):
+        """Send message to DID."""
+        return self.post("/send", {"to": to_did, "content": content})
+
+
+def cmd_status(args):
+    """Show daemon status."""
+    try:
+        client = DaemonClient(args.host, args.port)
+        status = client.get("/status")
+
+        print(f"\n{'='*50}")
+        print(f"Agent Messenger Status")
+        print(f"{'='*50}")
+        print(f"DID: {status['did']}")
+        print(f"Relay: {status['relay']}")
+        print(f"Connected: {'✅ Yes' if status['connected'] else '❌ No'}")
+        print(f"Contacts: {status['contacts']}")
+        print(f"Messages: {status['messages']}")
+        print(f"Profile: {status['profile']}")
+        print(f"Data Dir: {status['data_dir']}")
+        print(f"{'='*50}\n")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        print(f"   Make sure daemon is running: agentd.py --relay ws://...")
+        sys.exit(1)
+
+
+def cmd_send(args):
+    """Send a message."""
+    try:
+        client = DaemonClient(args.host, args.port)
+
+        # Build request
+        request_data = {"content": args.message}
+
+        if args.to:
+            request_data["to"] = args.to
+        elif args.to_name:
+            request_data["to_name"] = args.to_name
+        else:
+            print("❌ Must specify --to or --to-name")
+            sys.exit(1)
+
+        result = client.post("/send", request_data)
+
+        if result:
+            # Check for ambiguous name response
+            if isinstance(result, dict) and result.get("status") == "ambiguous_name":
+                print(f"⚠️  {result['message']}")
+                for suggestion in result.get("suggestions", []):
+                    print(f"   - {suggestion}")
+                sys.exit(1)
+
+            to_display = args.to or args.to_name
+            print(f"✅ Message sent to: {to_display}")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+    except HTTPException as e:
+        print(f"❌ {e.detail}")
+        sys.exit(1)
+
+
+def cmd_add_contact(args):
+    """Add a contact."""
+    try:
+        client = DaemonClient(args.host, args.port)
+        result = client.post("/add-contact", {
+            "did": args.did,
+            "name": args.name,
+            "notes": args.notes or ""
+        })
+
+        if result:
+            print(f"✅ Contact added: {args.name} ({args.did[:32]}...)")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_list_contacts(args):
+    """List all contacts."""
+    try:
+        client = DaemonClient(args.host, args.port)
+        result = client.get("/contacts")
+
+        contacts = result.get("contacts", [])
+
+        print(f"\n📋 Contacts ({len(contacts)}):")
+        print("-" * 60)
+
+        for contact in contacts:
+            print(f"\n  {contact['name']}")
+            print(f"    DID: {contact['did']}")
+            print(f"    Added: {contact.get('added_at', 'Unknown')}")
+            if contact.get('notes'):
+                print(f"    Notes: {contact['notes']}")
+
+        print()
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_list_messages(args):
+    """List recent messages."""
+    try:
+        client = DaemonClient(args.host, args.port)
+
+        # Build query params (from is a Python keyword, use getattr)
+        params = {"limit": args.limit}
+        if hasattr(args, 'from') and getattr(args, 'from'):
+            params["from_filter"] = getattr(args, 'from')
+
+        result = client.get("/messages", params=params)
+
+        # Get directory for DID to username resolution
+        directory = client.get("/directory")
+        did_to_username = {}
+        for agent_info in directory.get('agents', []):
+            did_to_username[agent_info['did']] = agent_info['username']
+
+        messages = result.get("messages", [])
+
+        print(f"\n📬 Recent Messages ({len(messages)}):")
+        if hasattr(args, 'from') and getattr(args, 'from'):
+            print(f"🔍 Filtered by: {getattr(args, 'from')}")
+        print("-" * 60)
+
+        for msg in messages:
+            sender_did = msg.get('from', 'Unknown')
+            content = msg.get('content', '')
+
+            # Resolve DID to username
+            sender_name = did_to_username.get(sender_did, None)
+            if sender_name:
+                sender_display = f"{sender_name} ({sender_did[:32]}...)"
+            else:
+                sender_display = sender_did[:48] + "..." if len(sender_did) > 48 else sender_did
+
+            # Format timestamp (prefer timestamp, fallback to saved_at)
+            timestamp = msg.get('timestamp') or msg.get('saved_at', '')
+            if timestamp:
+                # Parse and format nicely
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    timestamp_str = timestamp[:19]
+            else:
+                timestamp_str = "Unknown"
+
+            # Show full content, or indicate if it's very long
+            max_display = 200  # Show more, but still have a limit
+            if len(content) > max_display:
+                content_display = content[:max_display]
+                truncated = f"... ({len(content) - max_display} more chars)"
+            else:
+                content_display = content
+                truncated = ""
+
+            print(f"\n  [{timestamp_str}] {sender_display}")
+            print(f"  {content_display}{truncated}")
+
+        print()
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_get_did(args):
+    """Get and display DID."""
+    try:
+        client = DaemonClient(args.host, args.port)
+        status = client.get("/status")
+
+        print(status['did'])
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_register(args):
+    """Register username in directory."""
+    try:
+        client = DaemonClient(args.host, args.port)
+
+        # Validate username format
+        import re
+        username = args.username
+        if not re.match(r'^@[a-zA-Z0-9_]{2,19}$', username):
+            print("❌ Invalid username format")
+            print("   Must start with @")
+            print("   3-20 characters (including @)")
+            print("   Alphanumeric + underscore only")
+            print("   Example: @thal, @alice_123")
+            sys.exit(1)
+
+        # Build registration data
+        data = {
+            "username": username,
+            "description": args.description or "",
+            "purpose": args.purpose or "",
+            "tags": args.tags or []
+        }
+
+        result = client.post("/register", data)
+
+        if result:
+            print(f"✅ {result.get('message', 'Registered')}")
+            print(f"   Username: {result.get('username')}")
+            print(f"   DID: {result.get('did', '')[:32]}...")
+            if args.description:
+                print(f"   Description: {args.description}")
+            if args.purpose:
+                print(f"   Purpose: {args.purpose}")
+            if args.tags:
+                print(f"   Tags: {', '.join(args.tags)}")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_discover(args):
+    """Discover other agents."""
+    try:
+        client = DaemonClient(args.host, args.port)
+
+        params = {}
+        if args.search:
+            params['search'] = args.search
+        if args.format:
+            params['format'] = args.format
+
+        result = client.get("/directory", params=params)
+
+        if args.format == "json":
+            # Raw JSON output
+            import json
+            print(json.dumps(result, indent=2))
+            return
+
+        # Text format
+        if result and 'agents' in result:
+            agents = result['agents']
+            count = result.get('count', len(agents))
+
+            print(f"📖 Agent Directory ({count} agent{'s' if count != 1 else ''}):")
+            print("=" * 60)
+
+            if not agents:
+                print("No agents found.")
+                if args.search:
+                    print(f"\n💡 Try a different search term")
+                else:
+                    print(f"\n💡 Be the first to register: agentctl register @username --description 'AI agent' --purpose 'Collaborate on projects'")
+            else:
+                for agent in agents:
+                    username = agent.get('username', 'Unknown')
+                    description = agent.get('description', '')
+                    purpose = agent.get('purpose', '')
+                    tags = agent.get('tags', [])
+                    registered = agent.get('registered_at', '')
+
+                    print(f"\n  🤖 {username}")
+                    if description:
+                        print(f"     📝 {description}")
+                    if purpose:
+                        print(f"     🎯 {purpose}")
+                    if tags:
+                        print(f"     🏷️  {', '.join(tags)}")
+                    print(f"     📅 Registered: {registered[:10] if registered else 'N/A'}")
+            print()
+        else:
+            print("❌ Failed to query directory")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_share_did(args):
+    """Generate shareable DID link."""
+    try:
+        client = DaemonClient(args.host, args.port)
+        status = client.get("/status")
+
+        did = status['did']
+
+        print(f"📱 Share your DID:")
+        print(f"{'=' * 60}")
+        print(f"\n  DID: {did}")
+        print(f"\n  Agent-Messenger Link:")
+        print(f"  agent-messenger://{did}")
+        print(f"\n  QR Code (copy-paste this):")
+        print(f"  {did}")
+        print(f"\n  To add this contact:")
+        print(f"  agentctl add-contact {did} \"Your Name\"")
+        print(f"{'=' * 60}\n")
+
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to daemon")
+        sys.exit(1)
+
+
+def cmd_start_daemon(args):
+    """Start the daemon."""
+    import subprocess
+
+    # Build daemon command
+    cmd = [
+        sys.executable,  # Use same Python as client
+        "agentd.py",
+        "--relay", args.relay
+    ]
+
+    if args.profile:
+        cmd.extend(["--profile", args.profile])
+
+    if args.data_dir:
+        cmd.extend(["--data-dir", args.data_dir])
+
+    if args.port:
+        cmd.extend(["--api-port", args.port])
+
+    # Start daemon
+    print(f"[agentctl] Starting daemon...")
+    print(f"[agentctl] Command: {' '.join(cmd)}")
+
+    try:
+        subprocess.Popen(cmd, cwd=Path(__file__).parent)
+        print(f"[agentctl] ✅ Daemon started")
+        print(f"[agentctl] Wait a few seconds for it to initialize")
+    except Exception as e:
+        print(f"[agentctl] ❌ Failed to start: {e}")
+
+
+def cmd_stop_daemon(args):
+    """Stop the daemon."""
+    try:
+        client = DaemonClient(args.host, args.port)
+
+        # Try to call shutdown endpoint (if implemented)
+        # For now, just instruct user
+        print(f"[agentctl] To stop the daemon, find the process and kill it:")
+        print(f"[agentctl]   Linux/macOS: pkill -f agentd.py")
+        print(f"[agentctl]   Windows: taskkill /F /IM python.exe")
+        print(f"[agentctl] Or press Ctrl+C in the daemon terminal")
+
+    except requests.exceptions.ConnectionError:
+        print(f"[agentctl] Daemon is not running")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Agent Messenger Client v3.0",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  agentctl status
+  agentctl send --to did:key:... "Hello, World!"
+  agentctl add-contact did:key:... "Alice"
+  agentctl list-contacts
+  agentctl list-messages
+  agentctl start-daemon --relay ws://localhost:27432
+        """
+    )
+
+    parser.add_argument("--host", default=DEFAULT_API_HOST, help="Daemon API host")
+    parser.add_argument("--port", type=int, default=DEFAULT_API_PORT, help="Daemon API port")
+
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    # status command
+    subparsers.add_parser("status", help="Show daemon status")
+
+    # send command
+    send_parser = subparsers.add_parser("send", help="Send a message")
+    send_parser.add_argument("--to", help="Recipient DID")
+    send_parser.add_argument("--to-name", help="Recipient contact name")
+    send_parser.add_argument("message", help="Message content")
+
+    # add-contact command
+    contact_parser = subparsers.add_parser("add-contact", help="Add a contact")
+    contact_parser.add_argument("did", help="Contact DID")
+    contact_parser.add_argument("name", help="Contact name")
+    contact_parser.add_argument("--notes", default="", help="Optional notes")
+
+    # list-contacts command
+    subparsers.add_parser("list-contacts", help="List all contacts")
+
+    # list-messages command
+    msg_parser = subparsers.add_parser("list-messages", help="List recent messages")
+    msg_parser.add_argument("--limit", type=int, default=50, help="Max messages to show")
+    msg_parser.add_argument("--from", type=str, help="Filter messages by sender (username or DID)")
+
+    # get-did command
+    subparsers.add_parser("get-did", help="Get and display DID")
+
+    # start-daemon command
+    start_parser = subparsers.add_parser("start-daemon", help="Start the daemon")
+    start_parser.add_argument("--relay", required=True, help="Relay WebSocket URL")
+    start_parser.add_argument("--profile", help="Profile name")
+    start_parser.add_argument("--data-dir", help="Data directory")
+    start_parser.add_argument("--port", type=int, help="API port")
+
+    # stop-daemon command
+    subparsers.add_parser("stop-daemon", help="Stop the daemon")
+
+    # register command
+    register_parser = subparsers.add_parser("register", help="Register username in directory")
+    register_parser.add_argument("username", help="Username (e.g., @thal)")
+    register_parser.add_argument("--description", help="What you do", default="")
+    register_parser.add_argument("--purpose", help="Why to contact you", default="")
+    register_parser.add_argument("--tags", nargs="*", help="Tags (e.g., --tags ai coding)")
+
+    # discover command
+    discover_parser = subparsers.add_parser("discover", help="Discover other agents")
+    discover_parser.add_argument("--search", help="Search term for filtering")
+    discover_parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    # share-did command
+    subparsers.add_parser("share-did", help="Generate shareable DID link")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Execute command
+    commands = {
+        "status": cmd_status,
+        "send": cmd_send,
+        "add-contact": cmd_add_contact,
+        "list-contacts": cmd_list_contacts,
+        "list-messages": cmd_list_messages,
+        "get-did": cmd_get_did,
+        "start-daemon": cmd_start_daemon,
+        "stop-daemon": cmd_stop_daemon,
+        "register": cmd_register,
+        "discover": cmd_discover,
+        "share-did": cmd_share_did
+    }
+
+    if args.command in commands:
+        commands[args.command](args)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
