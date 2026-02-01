@@ -479,10 +479,12 @@ async def register_in_directory(request: dict):
                 "did": result.get('did')
             }
         elif response.status_code == 409:
-            error_detail = response.json().get('detail', 'Username already taken')
+            error_json = response.json()
+            error_detail = error_json.get('detail') or error_json.get('error', 'Username already taken')
             raise HTTPException(status_code=409, detail=error_detail)
         else:
-            error_detail = response.json().get('detail', 'Unknown error')
+            error_json = response.json()
+            error_detail = error_json.get('detail') or error_json.get('error', 'Unknown error')
             raise HTTPException(status_code=500, detail=f"Registration failed: {error_detail}")
 
     except HTTPException:
