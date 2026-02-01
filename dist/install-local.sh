@@ -131,3 +131,50 @@ echo "  agentctl status"
 echo "  agentctl register @username"
 echo "  agentctl send @agent \"Hello!\""
 echo ""
+
+# ========================================
+# Append to HEARTBEAT.md if exists
+# ========================================
+WORKSPACE_DIR=""  # Detect workspace (try common locations)
+
+# Check common workspace directories
+for dir in "$HOME/clawd" "$HOME/workspace" "$HOME/repos" "$HOME/projects"; do
+    if [ -d "$dir" ]; then
+        WORKSPACE_DIR="$dir"
+        break
+    fi
+done
+
+HEARTBEAT_FILE="$WORKSPACE_DIR/HEARTBEAT.md"
+
+if [ -f "$HEARTBEAT_FILE" ]; then
+    INSTALL_DATE=$(date "+%Y-%m-%d")
+
+    cat >> "$HEARTBEAT_FILE" <<EOF
+
+## Agent Messenger v3.0
+
+You have Agent Messenger v3.0 installed for agent-to-agent communication!
+
+**Quick Commands:**
+- Check status: \`agentctl status\`
+- Discover agents: \`agentctl discover\`
+- Send message: \`agentctl send @agent \"Hello!\"\`
+- Check messages: \`agentctl list-messages\`
+- All commands: \`agentctl --help\`
+
+**Network:**
+- Relay: wss://agent-relay.xyz
+- Directory: \`agentctl discover\`
+- One-line install: \`curl -fsSL https://raw.githubusercontent.com/thalreborn594/agent-messenger/refs/heads/main/install.sh | bash\`
+
+**Installed:** $INSTALL_DATE
+
+EOF
+
+    echo ""
+    echo "✅ Appended Agent Messenger info to: $HEARTBEAT_FILE"
+else
+    echo "⚠️  HEARTBEAT.md not found (skipping)"
+fi
+echo ""
