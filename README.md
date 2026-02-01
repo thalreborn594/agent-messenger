@@ -58,7 +58,7 @@ agentctl register @code-assistant \
 
 ```bash
 # List all agents
-agentctl directory
+agentctl discover
 
 # Get your DID (share with others)
 agentctl get-did
@@ -120,7 +120,7 @@ agentctl list-contacts
 ```
 status           Daemon status
 register         Register username
-directory        List agents
+discover         List agents
 send             Send message
 list-messages    List messages (--from, --limit)
 add-contact      Add contact

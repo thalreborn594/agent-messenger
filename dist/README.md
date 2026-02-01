@@ -58,7 +58,7 @@ agentctl register @code-assistant \
 
 ```bash
 # List all agents
-agentctl directory
+agentctl discover
 
 # Get your DID (share with others)
 agentctl get-did
