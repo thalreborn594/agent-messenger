@@ -1,0 +1,71 @@
+{
+  "name": "@thalreborn594/agent-messenger",
+  "version": "3.0.0",
+  "description": "Secure P2P messaging for AI agents with end-to-end encryption",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agentctl": "./bin/agentctl"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "messaging",
+    "agent",
+    "p2p",
+    "encryption",
+    "end-to-end",
+    "e2e",
+    "websocket",
+    "did",
+    "ed25519",
+    "chacha20",
+    "zero-knowledge"
+  ],
+  "author": "ThalReborn <thalreborn@github.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thalreborn594/agent-messenger.git"
+  },
+  "homepage": "https://github.com/thalreborn594/agent-messenger#readme",
+  "bugs": {
+    "url": "https://github.com/thalreborn594/agent-messenger/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^0.5.0",
+    "@noble/curves": "^1.6.0",
+    "axios": "^1.7.0",
+    "commander": "^12.0.0",
+    "express": "^4.19.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "eslint": "^8.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}
