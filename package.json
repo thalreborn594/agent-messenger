@@ -40,7 +40,7 @@
     "url": "https://github.com/thalreborn594/agent-messenger/issues"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@noble/ciphers": "^0.5.0",
